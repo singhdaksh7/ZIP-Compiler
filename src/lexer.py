@@ -22,9 +22,9 @@ class LexerError(Exception):
 class Lexer:
     def __init__(self, source: str):
         self.source = source
-        self.pos = 0          # current position in source
-        self.line = 1         # current line number
-        self.column = 1       # current column number
+        self.pos = 0         
+        self.line = 1         
+        self.column = 1     
         self.tokens = []
 
     def peek(self) -> str | None:
@@ -65,14 +65,14 @@ class Lexer:
         """Read a string literal enclosed in double quotes."""
         start_line = self.line
         start_col = self.column
-        self.advance()  # skip opening "
+        self.advance()  
 
         result = []
         while self.pos < len(self.source):
             ch = self.source[self.pos]
 
             if ch == '"':
-                self.advance()  # skip closing "
+                self.advance()  
                 return Token(TokenType.STRING_LITERAL, ''.join(result), start_line, start_col)
 
             if ch == '\\':
@@ -116,7 +116,7 @@ class Lexer:
 
         word = ''.join(result)
 
-        # Check if it's a keyword
+        
         token_type = KEYWORDS.get(word, TokenType.IDENTIFIER)
 
         return Token(token_type, word, start_line, start_col)
@@ -137,27 +137,27 @@ class Lexer:
             start_line = self.line
             start_col = self.column
 
-            # Comments
+          
             if ch == '/' and self.pos + 1 < len(self.source) and self.source[self.pos + 1] == '/':
                 self.skip_comment()
                 continue
 
-            # String literals
+            
             if ch == '"':
                 self.tokens.append(self.read_string())
                 continue
 
-            # Numbers
+            
             if ch.isdigit():
                 self.tokens.append(self.read_number())
                 continue
 
-            # Identifiers and keywords
+            
             if ch.isalpha() or ch == '_':
                 self.tokens.append(self.read_identifier())
                 continue
 
-            # Two-character operators
+            
             if ch == '=' and self.match_ahead('='):
                 self.advance(); self.advance()
                 self.tokens.append(self.make_token(TokenType.EQ, "==", start_line, start_col))
@@ -187,7 +187,7 @@ class Lexer:
                 self.tokens.append(self.make_token(TokenType.OR, "||", start_line, start_col))
                 continue
 
-            # Single-character tokens
+            
             single_char_tokens = {
                 '+': TokenType.PLUS,
                 '-': TokenType.MINUS,
@@ -212,10 +212,10 @@ class Lexer:
                 self.tokens.append(self.make_token(single_char_tokens[ch], ch, start_line, start_col))
                 continue
 
-            # Unknown character
+            
             raise LexerError(f"Unexpected character: {ch!r}", start_line, start_col)
 
-        # Add EOF token
+        
         self.tokens.append(Token(TokenType.EOF, "", self.line, self.column))
         return self.tokens
 
@@ -224,7 +224,6 @@ class Lexer:
         return self.pos + 1 < len(self.source) and self.source[self.pos + 1] == expected
 
 
-# --- Quick test ---
 if __name__ == "__main__":
     test_code = """
 fn main() -> int {

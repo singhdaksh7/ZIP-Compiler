@@ -8,60 +8,59 @@ from dataclasses import dataclass
 
 class TokenType(Enum):
     # Literals
-    INT_LITERAL = auto()      # 42, 0, 100
-    STRING_LITERAL = auto()   # "hello"
-    BOOL_LITERAL = auto()     # true, false
+    INT_LITERAL = auto()      
+    STRING_LITERAL = auto()   
+    BOOL_LITERAL = auto()     
 
     # Identifiers
-    IDENTIFIER = auto()       # variable/function names
+    IDENTIFIER = auto()       
 
     # Keywords
-    FN = auto()               # fn
-    LET = auto()              # let
-    RETURN = auto()           # return
-    IF = auto()               # if
-    ELSE = auto()             # else
-    WHILE = auto()            # while
-    FOR = auto()              # for
-    TRUE = auto()             # true
-    FALSE = auto()            # false
-    INT = auto()              # int (type)
-    BOOL = auto()             # bool (type)
-    STRING = auto()           # string (type)
-    VOID = auto()             # void (type)
-    PRINT = auto()            # print
+    FN = auto()               
+    LET = auto()              
+    RETURN = auto()           
+    IF = auto()              
+    ELSE = auto()             
+    WHILE = auto()           
+    FOR = auto()             
+    TRUE = auto()             
+    FALSE = auto()            
+    INT = auto()             
+    BOOL = auto()             
+    STRING = auto()           
+    VOID = auto()             
+    PRINT = auto()            
 
-    # Operators
-    PLUS = auto()             # +
-    MINUS = auto()            # -
-    STAR = auto()             # *
-    SLASH = auto()            # /
-    PERCENT = auto()          # %
-    ASSIGN = auto()           # =
-    EQ = auto()               # ==
-    NEQ = auto()              # !=
-    LT = auto()               # <
-    GT = auto()               # >
-    LTE = auto()              # <=
-    GTE = auto()              # >=
-    AND = auto()              # &&
-    OR = auto()               # ||
-    NOT = auto()              # !
+    
+    PLUS = auto()            
+    MINUS = auto()            
+    STAR = auto()             
+    SLASH = auto()           
+    PERCENT = auto()          
+    ASSIGN = auto()           
+    EQ = auto()               
+    NEQ = auto()             
+    LT = auto()              
+    GT = auto()               
+    LTE = auto()             
+    GTE = auto()            
+    AND = auto()              
+    OR = auto()               
+    NOT = auto()            
 
-    # Delimiters
-    LPAREN = auto()           # (
-    RPAREN = auto()           # )
-    LBRACE = auto()           # {
-    RBRACE = auto()           # }
-    SEMICOLON = auto()        # ;
-    COLON = auto()            # :
-    COMMA = auto()            # ,
-    ARROW = auto()            # ->
 
-    # Special
-    EOF = auto()              # End of file
-    NEWLINE = auto()          # \n (tracked for line counting)
+    LPAREN = auto()        
+    RPAREN = auto()          
+    LBRACE = auto()           
+    RBRACE = auto()          
+    SEMICOLON = auto()       
+    COLON = auto()           
+    COMMA = auto()           
+    ARROW = auto()         
 
+   
+    EOF = auto()              
+    NEWLINE = auto()          
 
 # Keyword lookup table
 KEYWORDS = {
