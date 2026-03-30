@@ -50,12 +50,13 @@ ZIP Source (.zip)
 compiler/
 ├── README.md
 ├── src/
-│   ├── lexer.py        # Tokenizer
-│   ├── parser.py       # Parser → AST
-│   ├── ast_nodes.py    # AST node definitions
-│   ├── analyzer.py     # Semantic analysis
-│   ├── codegen.py      # x86-64 assembly generation
-│   └── main.py         # CLI entry point
+│   ├── tokens.py       # Token types and keyword definitions
+│   ├── lexer.py        # Tokenizer (source code → tokens)
+│   ├── parser.py       # Parser → AST (planned)
+│   ├── ast_nodes.py    # AST node definitions (planned)
+│   ├── analyzer.py     # Semantic analysis (planned)
+│   ├── codegen.py      # x86-64 assembly generation (planned)
+│   └── main.py         # CLI entry point (planned)
 ├── tests/              # Test programs and unit tests
 ├── examples/           # Example ZIP programs
 └── docs/               # Language specification and notes
@@ -93,10 +94,47 @@ fn main() -> int {
 
 > The full language spec will evolve in `docs/` as the project grows.
 
+## Lexer
+
+The lexer (tokenizer) is complete. It converts raw ZIP source code into a stream of tokens. Run it standalone to see the output:
+
+```bash
+python src/lexer.py
+```
+
+**Supported tokens:**
+
+| Category    | Tokens                                                        |
+|-------------|---------------------------------------------------------------|
+| Keywords    | `fn`, `let`, `return`, `if`, `else`, `while`, `for`, `print`  |
+| Types       | `int`, `bool`, `string`, `void`                               |
+| Literals    | integers (`42`), strings (`"hello"`), booleans (`true/false`) |
+| Operators   | `+`, `-`, `*`, `/`, `%`, `=`, `==`, `!=`, `<`, `>`, `<=`, `>=`, `&&`, `||`, `!` |
+| Delimiters  | `(`, `)`, `{`, `}`, `;`, `:`, `,`, `->`                      |
+| Comments    | `// single-line comments`                                     |
+
+**Example:**
+
+```
+let x: int = 42;
+```
+
+Produces:
+
+```
+Token(LET, 'let', line=1, col=1)
+Token(IDENTIFIER, 'x', line=1, col=5)
+Token(COLON, ':', line=1, col=6)
+Token(INT, 'int', line=1, col=8)
+Token(ASSIGN, '=', line=1, col=12)
+Token(INT_LITERAL, '42', line=1, col=14)
+Token(SEMICOLON, ';', line=1, col=16)
+```
+
 ## Roadmap
 
 - [x] Project setup
-- [ ] Lexer
+- [x] Lexer
 - [ ] Parser + AST
 - [ ] Semantic analysis
 - [ ] Code generation (x86-64)
