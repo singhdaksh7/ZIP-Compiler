@@ -56,11 +56,14 @@ class TokenType(Enum):
     SEMICOLON = auto()       
     COLON = auto()           
     COMMA = auto()           
-    ARROW = auto()         
+    ARROW = auto()
 
-   
-    EOF = auto()              
-    NEWLINE = auto()          
+    BREAK = auto()
+    CONTINUE = auto()
+
+
+    EOF = auto()
+    NEWLINE = auto()
 
 # Keyword lookup table
 KEYWORDS = {
@@ -78,6 +81,8 @@ KEYWORDS = {
     "string": TokenType.STRING,
     "void": TokenType.VOID,
     "print": TokenType.PRINT,
+    "break": TokenType.BREAK,
+    "continue": TokenType.CONTINUE,
 }
 
 

@@ -16,6 +16,7 @@ from ast_nodes import (
     Program, Function, Parameter,
     LetStatement, AssignStatement, ReturnStatement,
     IfStatement, WhileStatement, ForStatement, ExpressionStatement,
+    BreakStatement, ContinueStatement,
     BinaryOp, UnaryOp, IntLiteral, StringLiteral, BoolLiteral,
     Identifier, FunctionCall,
 )
@@ -149,6 +150,14 @@ class Parser:
             return self.parse_while()
         elif token.type == TokenType.FOR:
             return self.parse_for()
+        elif token.type == TokenType.BREAK:
+            t = self.advance()
+            self.expect(TokenType.SEMICOLON)
+            return BreakStatement(line=t.line, col=t.column)
+        elif token.type == TokenType.CONTINUE:
+            t = self.advance()
+            self.expect(TokenType.SEMICOLON)
+            return ContinueStatement(line=t.line, col=t.column)
         else:
             return self.parse_expression_or_assign()
 
@@ -470,6 +479,12 @@ def print_ast(node, indent=0):
     elif isinstance(node, ExpressionStatement):
         print(f"{pad}ExprStmt")
         print_ast(node.expression, indent + 1)
+
+    elif isinstance(node, BreakStatement):
+        print(f"{pad}Break")
+
+    elif isinstance(node, ContinueStatement):
+        print(f"{pad}Continue")
 
     elif isinstance(node, BinaryOp):
         print(f"{pad}BinaryOp '{node.op}'")

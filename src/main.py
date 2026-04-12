@@ -12,10 +12,11 @@ Usage:
     python src/main.py examples/hello.zip -o hello
 
 Options:
-    -o          Output file name (default: output)
+    -o <name>   Output file name (default: output)
     --tokens    Print tokens and exit
     --ast       Print AST and exit
-    --asm       Print assembly and exit (don't write to file)
+    --asm       Print generated assembly and exit (don't write file)
+    --run       Compile and immediately run the binary (Linux/WSL only)
 """
 
 import sys
@@ -32,7 +33,7 @@ from codegen import CodeGenerator, CodeGenError
 
 
 def compile_file(source_path: str, output_name: str = "output",
-                 show_tokens=False, show_ast=False, show_asm=False):
+                 show_tokens=False, show_ast=False, show_asm=False, run=False):
     """Compile a ZIP source file through all phases."""
 
     # Read source file
@@ -46,7 +47,7 @@ def compile_file(source_path: str, output_name: str = "output",
     filename = os.path.basename(source_path)
     print(f"\n  ZIP Compiler v0.1")
     print(f"  Compiling: {filename}")
-    print(f"  {'─' * 40}")
+    print(f"  {'-' * 40}")
 
     # Phase 1: Lexing
     print(f"  [1/4] Lexing...", end=" ")
@@ -114,22 +115,36 @@ def compile_file(source_path: str, output_name: str = "output",
     print(f"\n  Output: {asm_file}")
 
     # Try to assemble and link with GCC (if available)
-    print(f"  {'─' * 40}")
+    print(f"  {'-' * 40}")
+    linked = False
     try:
         result = subprocess.run(
             ["gcc", "-o", output_name, asm_file, "-no-pie"],
             capture_output=True, text=True
         )
         if result.returncode == 0:
-            print(f"  Linked: ./{output_name}")
-            print(f"\n  Run with: ./{output_name}")
+            print(f"  Linked:  ./{output_name}")
+            linked = True
         else:
-            print(f"  Could not link (GCC not found or error).")
-            print(f"  To compile manually on Linux/WSL:")
-            print(f"    gcc -o {output_name} {asm_file} -no-pie")
+            print(f"  Link failed:")
+            for line in result.stderr.strip().splitlines():
+                print(f"    {line}")
+            print(f"  To retry manually: gcc -o {output_name} {asm_file} -no-pie")
     except FileNotFoundError:
-        print(f"  GCC not found. To compile the assembly:")
+        print(f"  GCC not found. To compile the assembly on Linux/WSL:")
         print(f"    gcc -o {output_name} {asm_file} -no-pie")
+
+    if linked and run:
+        print(f"\n  Running ./{output_name}:")
+        print(f"  {'-' * 40}")
+        try:
+            proc = subprocess.run([f"./{output_name}"], text=True)
+            print(f"  {'-' * 40}")
+            print(f"  Exited with code {proc.returncode}")
+        except Exception as e:
+            print(f"  Could not run binary: {e}")
+    elif linked and not run:
+        print(f"\n  Run with: ./{output_name}")
 
     print()
 
@@ -145,6 +160,7 @@ def main():
         print("    --tokens     Print tokens and exit")
         print("    --ast        Print AST and exit")
         print("    --asm        Print generated assembly and exit")
+        print("    --run        Compile and run immediately (Linux/WSL)")
         print()
         print("  Example:")
         print("    python src/main.py examples/hello.zip -o hello")
@@ -156,6 +172,7 @@ def main():
     show_tokens = False
     show_ast = False
     show_asm = False
+    run = False
 
     # Parse arguments
     i = 2
@@ -172,11 +189,14 @@ def main():
         elif sys.argv[i] == "--asm":
             show_asm = True
             i += 1
+        elif sys.argv[i] == "--run":
+            run = True
+            i += 1
         else:
             print(f"Unknown option: {sys.argv[i]}")
             sys.exit(1)
 
-    compile_file(source_path, output_name, show_tokens, show_ast, show_asm)
+    compile_file(source_path, output_name, show_tokens, show_ast, show_asm, run)
 
 
 if __name__ == "__main__":

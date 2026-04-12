@@ -20,6 +20,7 @@ from ast_nodes import (
     Program, Function, Parameter,
     LetStatement, AssignStatement, ReturnStatement,
     IfStatement, WhileStatement, ForStatement, ExpressionStatement,
+    BreakStatement, ContinueStatement,
     BinaryOp, UnaryOp, IntLiteral, StringLiteral, BoolLiteral,
     Identifier, FunctionCall,
 )
@@ -68,6 +69,7 @@ class Analyzer:
     def __init__(self):
         self.functions = {}    # name -> {"params": [...], "return_type": str}
         self.current_function_return_type = "void"
+        self.loop_depth = 0    # tracks nesting depth inside loops
         self.errors = []       # collect all errors instead of stopping at first one
 
     def analyze(self, program: Program):
@@ -152,6 +154,12 @@ class Analyzer:
             self.analyze_for(stmt, scope)
         elif isinstance(stmt, ExpressionStatement):
             self.analyze_expression(stmt.expression, scope)
+        elif isinstance(stmt, BreakStatement):
+            if self.loop_depth == 0:
+                self.error("'break' used outside of a loop", stmt.line, stmt.col)
+        elif isinstance(stmt, ContinueStatement):
+            if self.loop_depth == 0:
+                self.error("'continue' used outside of a loop", stmt.line, stmt.col)
         else:
             self.error(f"Unknown statement type: {type(stmt).__name__}")
 
@@ -230,9 +238,11 @@ class Analyzer:
         if cond_type and cond_type != "bool" and cond_type != "any":
             self.error(f"While condition must be 'bool', got '{cond_type}'", stmt.line, stmt.col)
 
+        self.loop_depth += 1
         body_scope = scope.child()
         for s in stmt.body:
             self.analyze_statement(s, body_scope)
+        self.loop_depth -= 1
 
     def analyze_for(self, stmt: ForStatement, scope: Scope):
         """Analyze: for init; cond; update { ... }"""
@@ -247,8 +257,10 @@ class Analyzer:
 
         self.analyze_statement(stmt.update, for_scope)
 
+        self.loop_depth += 1
         for s in stmt.body:
             self.analyze_statement(s, for_scope)
+        self.loop_depth -= 1
 
     # ─── Expressions ───────────────────────────────────────────
 

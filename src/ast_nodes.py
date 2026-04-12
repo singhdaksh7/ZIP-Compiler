@@ -127,6 +127,18 @@ class ExpressionStatement:
     line: int = 0
     col: int = 0
 
+@dataclass
+class BreakStatement:
+    """Break out of the nearest enclosing loop: break;"""
+    line: int = 0
+    col: int = 0
+
+@dataclass
+class ContinueStatement:
+    """Skip to the next iteration of the nearest enclosing loop: continue;"""
+    line: int = 0
+    col: int = 0
+
 
 # ─── Top-level ─────────────────────────────────────────────────
 

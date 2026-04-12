@@ -4,10 +4,6 @@ Code Generator for the ZIP language.
 Converts the AST into x86-64 assembly (AT&T syntax, System V ABI).
 The generated assembly can be assembled and linked on Linux (or WSL):
 
-    as -o output.o output.s
-    ld -o output output.o -lc -dynamic-linker /lib64/ld-linux-x86-64.so.2
-
-Or with GCC:
     gcc -o output output.s -no-pie
 
 Usage:
@@ -19,6 +15,7 @@ from ast_nodes import (
     Program, Function, Parameter,
     LetStatement, AssignStatement, ReturnStatement,
     IfStatement, WhileStatement, ForStatement, ExpressionStatement,
+    BreakStatement, ContinueStatement,
     BinaryOp, UnaryOp, IntLiteral, StringLiteral, BoolLiteral,
     Identifier, FunctionCall,
 )
@@ -31,12 +28,22 @@ class CodeGenError(Exception):
 
 class CodeGenerator:
     def __init__(self):
-        self.output = []           # lines of assembly
-        self.string_literals = []  # collected string constants
-        self.label_count = 0       # for generating unique labels
-        self.variables = {}        # variable name -> stack offset
-        self.stack_offset = 0      # current stack offset
-        self.scope_stack = []      # for saving/restoring scopes
+        self.output = []            # lines of assembly
+        self.string_literals = []   # collected string constants
+        self.label_count = 0        # for generating unique labels
+
+        # Per-function state (reset in generate_function)
+        self.variables = {}         # var name -> stack offset from %rbp
+        self.var_types = {}         # var name -> type ("int", "string", "bool")
+        self.stack_offset = 0       # current top-of-locals offset
+        self.max_stack_offset = 0   # maximum depth reached (for PLACEHOLDER patch)
+        self.scope_stack = []       # for saving/restoring scopes across blocks
+
+        # Loop label stack for break/continue: list of (loop_top_label, loop_end_label)
+        self.loop_labels = []
+
+        # Function signatures (populated from Program before body gen)
+        self.func_return_types = {} # fn name -> return type string
 
     def emit(self, line: str):
         """Add a line of assembly."""
@@ -54,20 +61,71 @@ class CodeGenerator:
         return label
 
     def push_scope(self):
-        """Save the current variable scope."""
-        self.scope_stack.append((dict(self.variables), self.stack_offset))
+        """Save the current variable scope (variables, types, and stack_offset)."""
+        self.scope_stack.append((
+            dict(self.variables),
+            dict(self.var_types),
+            self.stack_offset,
+        ))
 
     def pop_scope(self):
-        """Restore the previous variable scope."""
-        self.variables, self.stack_offset = self.scope_stack.pop()
+        """
+        Restore the previous variable scope.
+
+        IMPORTANT: we restore stack_offset so that stack slots used by
+        out-of-scope variables can be reused — but we keep max_stack_offset
+        at the high-water mark so the function prologue reserves enough space.
+        """
+        self.variables, self.var_types, self.stack_offset = self.scope_stack.pop()
+
+    def alloc_var(self, name: str, var_type: str):
+        """Allocate 8 bytes on the stack for a new variable."""
+        self.stack_offset += 8
+        self.variables[name] = self.stack_offset
+        self.var_types[name] = var_type
+        if self.stack_offset > self.max_stack_offset:
+            self.max_stack_offset = self.stack_offset
+
+    def expr_type(self, expr) -> str:
+        """
+        Best-effort type inference for an expression (used by print).
+        Returns "string", "int", "bool", or "unknown".
+        """
+        if isinstance(expr, StringLiteral):
+            return "string"
+        if isinstance(expr, IntLiteral):
+            return "int"
+        if isinstance(expr, BoolLiteral):
+            return "int"   # bools are 0/1 integers at runtime
+        if isinstance(expr, Identifier):
+            return self.var_types.get(expr.name, "unknown")
+        if isinstance(expr, FunctionCall):
+            return self.func_return_types.get(expr.name, "unknown")
+        if isinstance(expr, BinaryOp):
+            if expr.op in ("+", "-", "*", "/", "%"):
+                left = self.expr_type(expr.left)
+                if left == "string":
+                    return "string"
+                return "int"
+            if expr.op in ("==", "!=", "<", ">", "<=", ">=", "&&", "||"):
+                return "int"   # booleans stored as int
+        if isinstance(expr, UnaryOp):
+            if expr.op == "-":
+                return "int"
+            if expr.op == "!":
+                return "int"
+        return "unknown"
 
     # ─── Main Entry Point ──────────────────────────────────────
 
     def generate(self, program: Program) -> str:
         """Generate x86-64 assembly for the entire program."""
 
-        # Data section (string literals will be added here)
-        # We'll insert them at the end once we know all strings
+        # Collect function return types for type-aware code generation
+        for fn in program.functions:
+            self.func_return_types[fn.name] = fn.return_type
+        # Built-ins
+        self.func_return_types["print"] = "void"
 
         # Text section
         self.emit("    .text")
@@ -76,20 +134,23 @@ class CodeGenerator:
         for fn in program.functions:
             self.generate_function(fn)
 
-        # Build the final output with data section
+        # Build the final output with data section at the top
         result = []
 
-        # Data section for string literals
+        # User string literals
         if self.string_literals:
             result.append("    .section .rodata")
-            for label, value in self.string_literals:
-                # Escape special characters for assembly
-                escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\t", "\\t")
-                result.append(f'{label}:')
+            for lbl, value in self.string_literals:
+                escaped = (value
+                           .replace("\\", "\\\\")
+                           .replace('"', '\\"')
+                           .replace("\n", "\\n")
+                           .replace("\t", "\\t"))
+                result.append(f'{lbl}:')
                 result.append(f'    .string "{escaped}"')
             result.append("")
 
-        # Format string for printf (integers)
+        # Printf format strings
         result.append("    .section .rodata")
         result.append('.int_fmt:')
         result.append('    .string "%d\\n"')
@@ -97,57 +158,57 @@ class CodeGenerator:
         result.append('    .string "%s\\n"')
         result.append("")
 
-        # Add the text section
         result.extend(self.output)
-
         return "\n".join(result)
 
     # ─── Functions ─────────────────────────────────────────────
 
     def generate_function(self, fn: Function):
         """Generate assembly for a function definition."""
+        # Reset per-function state
         self.variables = {}
+        self.var_types = {}
         self.stack_offset = 0
+        self.max_stack_offset = 0
         self.scope_stack = []
+        self.loop_labels = []
 
-        # Make the function visible to the linker
         self.emit(f"    .globl {fn.name}")
         self.emit(f"{fn.name}:")
 
-        # Function prologue: set up stack frame
+        # Prologue
         self.emit("    pushq %rbp")
         self.emit("    movq %rsp, %rbp")
 
-        # Reserve stack space (we'll patch this later)
+        # Reserve stack space — patch after body so we know the real size
         stack_reserve_index = len(self.output)
         self.emit("    subq $PLACEHOLDER, %rsp")
 
-        # Store parameters on the stack
-        # System V ABI: first 6 args in rdi, rsi, rdx, rcx, r8, r9
+        # Spill parameters from registers to the stack (System V ABI)
         param_registers = ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"]
         for i, param in enumerate(fn.params):
-            if i < len(param_registers):
-                self.stack_offset += 8
-                self.variables[param.name] = self.stack_offset
-                self.emit(f"    movq {param_registers[i]}, -{self.stack_offset}(%rbp)")
+            if i >= len(param_registers):
+                raise CodeGenError(f"Function '{fn.name}': more than 6 parameters not supported")
+            self.alloc_var(param.name, param.type_name)
+            self.emit(f"    movq {param_registers[i]}, -{self.stack_offset}(%rbp)")
 
         # Generate body
         for stmt in fn.body:
             self.generate_statement(stmt)
 
-        # If function has no explicit return, add one
+        # Implicit return 0 if the last statement is not a return
         if not fn.body or not isinstance(fn.body[-1], ReturnStatement):
             self.emit("    movq $0, %rax")
             self.emit("    leave")
             self.emit("    ret")
 
-        # Patch stack reservation (align to 16 bytes)
-        total_stack = self.stack_offset
-        if total_stack % 16 != 0:
-            total_stack += 16 - (total_stack % 16)
-        if total_stack == 0:
-            total_stack = 16  # minimum reservation
-        self.output[stack_reserve_index] = f"    subq ${total_stack}, %rsp"
+        # Patch PLACEHOLDER with the actual (max) stack size, 16-byte aligned
+        total = self.max_stack_offset
+        if total % 16 != 0:
+            total += 16 - (total % 16)
+        if total == 0:
+            total = 16   # always reserve at least 16 bytes
+        self.output[stack_reserve_index] = f"    subq ${total}, %rsp"
 
         self.emit("")  # blank line between functions
 
@@ -169,24 +230,24 @@ class CodeGenerator:
             self.generate_for(stmt)
         elif isinstance(stmt, ExpressionStatement):
             self.generate_expression(stmt.expression)
+        elif isinstance(stmt, BreakStatement):
+            self.generate_break(stmt)
+        elif isinstance(stmt, ContinueStatement):
+            self.generate_continue(stmt)
         else:
             raise CodeGenError(f"Unknown statement type: {type(stmt).__name__}")
 
     def generate_let(self, stmt: LetStatement):
-        """Generate: let x: int = expr;"""
-        # Evaluate the expression (result goes in %rax)
+        """Generate: let x: type = expr;"""
         self.generate_expression(stmt.value)
-
-        # Allocate stack space for this variable
-        self.stack_offset += 8
-        self.variables[stmt.name] = self.stack_offset
-
-        # Store the value on the stack
+        self.alloc_var(stmt.name, stmt.type_name)
         self.emit(f"    movq %rax, -{self.stack_offset}(%rbp)")
 
     def generate_assign(self, stmt: AssignStatement):
         """Generate: x = expr;"""
         self.generate_expression(stmt.value)
+        if stmt.name not in self.variables:
+            raise CodeGenError(f"Undeclared variable '{stmt.name}' in assignment")
         offset = self.variables[stmt.name]
         self.emit(f"    movq %rax, -{offset}(%rbp)")
 
@@ -196,8 +257,6 @@ class CodeGenerator:
             self.generate_expression(stmt.value)
         else:
             self.emit("    movq $0, %rax")
-
-        # Function epilogue
         self.emit("    leave")
         self.emit("    ret")
 
@@ -206,7 +265,6 @@ class CodeGenerator:
         else_label = self.label("else")
         end_label = self.label("endif")
 
-        # Evaluate condition
         self.generate_expression(stmt.condition)
         self.emit("    cmpq $0, %rax")
 
@@ -215,7 +273,6 @@ class CodeGenerator:
         else:
             self.emit(f"    je {end_label}")
 
-        # Then body
         self.push_scope()
         for s in stmt.then_body:
             self.generate_statement(s)
@@ -224,8 +281,6 @@ class CodeGenerator:
         if stmt.else_body:
             self.emit(f"    jmp {end_label}")
             self.emit(f"{else_label}:")
-
-            # Else body
             self.push_scope()
             for s in stmt.else_body:
                 self.generate_statement(s)
@@ -238,14 +293,13 @@ class CodeGenerator:
         loop_label = self.label("while")
         end_label = self.label("endwhile")
 
+        self.loop_labels.append((loop_label, end_label))
         self.emit(f"{loop_label}:")
 
-        # Evaluate condition
         self.generate_expression(stmt.condition)
         self.emit("    cmpq $0, %rax")
         self.emit(f"    je {end_label}")
 
-        # Body
         self.push_scope()
         for s in stmt.body:
             self.generate_statement(s)
@@ -253,36 +307,49 @@ class CodeGenerator:
 
         self.emit(f"    jmp {loop_label}")
         self.emit(f"{end_label}:")
+        self.loop_labels.pop()
 
     def generate_for(self, stmt: ForStatement):
         """Generate: for init; cond; update { ... }"""
-        loop_label = self.label("for")
-        end_label = self.label("endfor")
+        cond_label   = self.label("for")
+        update_label = self.label("for_update")   # continue target: run update first
+        end_label    = self.label("endfor")
 
         self.push_scope()
-
-        # Init
         self.generate_statement(stmt.init)
 
-        # Loop start
-        self.emit(f"{loop_label}:")
+        # For `continue`: jump to update (not condition), so the increment runs.
+        self.loop_labels.append((update_label, end_label))
+        self.emit(f"{cond_label}:")
 
-        # Condition
         self.generate_expression(stmt.condition)
         self.emit("    cmpq $0, %rax")
         self.emit(f"    je {end_label}")
 
-        # Body
         for s in stmt.body:
             self.generate_statement(s)
 
-        # Update
+        self.emit(f"{update_label}:")
         self.generate_statement(stmt.update)
-
-        self.emit(f"    jmp {loop_label}")
+        self.emit(f"    jmp {cond_label}")
         self.emit(f"{end_label}:")
 
+        self.loop_labels.pop()
         self.pop_scope()
+
+    def generate_break(self, stmt: BreakStatement):
+        """Generate: break;  — jump to end of nearest enclosing loop."""
+        if not self.loop_labels:
+            raise CodeGenError("'break' used outside of a loop")
+        _, end_label = self.loop_labels[-1]
+        self.emit(f"    jmp {end_label}")
+
+    def generate_continue(self, stmt: ContinueStatement):
+        """Generate: continue;  — jump to top of nearest enclosing loop."""
+        if not self.loop_labels:
+            raise CodeGenError("'continue' used outside of a loop")
+        loop_label, _ = self.loop_labels[-1]
+        self.emit(f"    jmp {loop_label}")
 
     # ─── Expressions ───────────────────────────────────────────
     # All expressions leave their result in %rax
@@ -294,14 +361,15 @@ class CodeGenerator:
             self.emit(f"    movq ${expr.value}, %rax")
 
         elif isinstance(expr, BoolLiteral):
-            val = 1 if expr.value else 0
-            self.emit(f"    movq ${val}, %rax")
+            self.emit(f"    movq ${'1' if expr.value else '0'}, %rax")
 
         elif isinstance(expr, StringLiteral):
-            label = self.add_string(expr.value)
-            self.emit(f"    leaq {label}(%rip), %rax")
+            lbl = self.add_string(expr.value)
+            self.emit(f"    leaq {lbl}(%rip), %rax")
 
         elif isinstance(expr, Identifier):
+            if expr.name not in self.variables:
+                raise CodeGenError(f"Undeclared variable '{expr.name}'")
             offset = self.variables[expr.name]
             self.emit(f"    movq -{offset}(%rbp), %rax")
 
@@ -318,17 +386,17 @@ class CodeGenerator:
             raise CodeGenError(f"Unknown expression type: {type(expr).__name__}")
 
     def generate_binary_op(self, expr: BinaryOp):
-        """Generate code for a binary operation."""
-        # Evaluate left side
+        """Generate code for a binary operation. Result in %rax."""
+        # Evaluate left, save on stack
         self.generate_expression(expr.left)
-        self.emit("    pushq %rax")  # save left on stack
+        self.emit("    pushq %rax")
 
-        # Evaluate right side
+        # Evaluate right
         self.generate_expression(expr.right)
-        self.emit("    movq %rax, %rcx")  # right in %rcx
+        self.emit("    movq %rax, %rcx")   # right -> %rcx
 
         # Restore left to %rax
-        self.emit("    popq %rax")  # left in %rax
+        self.emit("    popq %rax")          # left -> %rax
 
         # Arithmetic
         if expr.op == "+":
@@ -338,65 +406,58 @@ class CodeGenerator:
         elif expr.op == "*":
             self.emit("    imulq %rcx, %rax")
         elif expr.op == "/":
-            self.emit("    cqto")           # sign-extend rax into rdx:rax
-            self.emit("    idivq %rcx")     # result in rax, remainder in rdx
+            self.emit("    cqto")
+            self.emit("    idivq %rcx")
         elif expr.op == "%":
             self.emit("    cqto")
             self.emit("    idivq %rcx")
-            self.emit("    movq %rdx, %rax")  # remainder is in rdx
+            self.emit("    movq %rdx, %rax")
 
-        # Comparisons (result: 1 or 0 in %rax)
+        # Comparisons — produce 1 or 0
         elif expr.op in ("==", "!=", "<", ">", "<=", ">="):
             self.emit("    cmpq %rcx, %rax")
-            cond_map = {
-                "==": "sete",
-                "!=": "setne",
-                "<":  "setl",
-                ">":  "setg",
-                "<=": "setle",
-                ">=": "setge",
+            set_map = {
+                "==": "sete",  "!=": "setne",
+                "<":  "setl",  ">":  "setg",
+                "<=": "setle", ">=": "setge",
             }
-            self.emit(f"    {cond_map[expr.op]} %al")
+            self.emit(f"    {set_map[expr.op]} %al")
             self.emit("    movzbq %al, %rax")
 
-        # Logical
+        # Logical &&  (short-circuit already evaluated both sides, but that's OK
+        # for a simple compiler; true short-circuit needs jump-based lazy eval)
         elif expr.op == "&&":
-            # Short-circuit: if left is 0, result is 0
             self.emit("    cmpq $0, %rax")
-            short_label = self.label("and_short")
-            end_label = self.label("and_end")
-            self.emit(f"    je {short_label}")
-            # Left is true, check right
+            short = self.label("and_short")
+            end   = self.label("and_end")
+            self.emit(f"    je {short}")
             self.emit("    cmpq $0, %rcx")
             self.emit("    setne %al")
             self.emit("    movzbq %al, %rax")
-            self.emit(f"    jmp {end_label}")
-            self.emit(f"{short_label}:")
+            self.emit(f"    jmp {end}")
+            self.emit(f"{short}:")
             self.emit("    movq $0, %rax")
-            self.emit(f"{end_label}:")
+            self.emit(f"{end}:")
 
         elif expr.op == "||":
-            # Short-circuit: if left is 1, result is 1
             self.emit("    cmpq $0, %rax")
-            short_label = self.label("or_short")
-            end_label = self.label("or_end")
-            self.emit(f"    jne {short_label}")
-            # Left is false, check right
+            short = self.label("or_short")
+            end   = self.label("or_end")
+            self.emit(f"    jne {short}")
             self.emit("    cmpq $0, %rcx")
             self.emit("    setne %al")
             self.emit("    movzbq %al, %rax")
-            self.emit(f"    jmp {end_label}")
-            self.emit(f"{short_label}:")
+            self.emit(f"    jmp {end}")
+            self.emit(f"{short}:")
             self.emit("    movq $1, %rax")
-            self.emit(f"{end_label}:")
+            self.emit(f"{end}:")
 
         else:
             raise CodeGenError(f"Unknown binary operator: '{expr.op}'")
 
     def generate_unary_op(self, expr: UnaryOp):
-        """Generate code for a unary operation."""
+        """Generate code for a unary operation. Result in %rax."""
         self.generate_expression(expr.operand)
-
         if expr.op == "-":
             self.emit("    negq %rax")
         elif expr.op == "!":
@@ -407,48 +468,48 @@ class CodeGenerator:
             raise CodeGenError(f"Unknown unary operator: '{expr.op}'")
 
     def generate_call(self, expr: FunctionCall):
-        """Generate code for a function call."""
-        # Handle print specially
+        """Generate code for a function call. Return value in %rax."""
         if expr.name == "print":
             self.generate_print(expr)
             return
 
-        # Evaluate arguments and put them in the right registers
         arg_registers = ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"]
 
-        # First, evaluate all args and push them (in case they clobber registers)
+        # Evaluate all args and push to stack
         for arg in expr.args:
             self.generate_expression(arg)
             self.emit("    pushq %rax")
 
-        # Pop args into registers (in reverse order)
+        # Pop into registers (reverse order)
         for i in range(len(expr.args) - 1, -1, -1):
             self.emit(f"    popq {arg_registers[i]}")
 
-        # Align stack to 16 bytes before call if needed
-        self.emit("    movq $0, %rax")  # clear rax (for variadic functions)
+        self.emit("    movq $0, %rax")   # clear AL for variadic calls
         self.emit(f"    call {expr.name}")
 
     def generate_print(self, expr: FunctionCall):
-        """Generate code for the built-in print function using printf."""
+        """
+        Generate code for the built-in print(value).
+
+        Uses printf with %d\\n for integers/bools and %s\\n for strings.
+        The type is determined statically from the AST.
+        """
         if not expr.args:
             return
 
-        # Evaluate the argument
-        self.generate_expression(expr.args[0])
-
-        # For now, we'll determine at compile time if it's a string or int
         arg = expr.args[0]
-        if isinstance(arg, StringLiteral):
-            # String: use %s format
-            self.emit("    movq %rax, %rsi")           # string pointer as second arg
-            self.emit("    leaq .str_fmt(%rip), %rdi")  # format string as first arg
-        else:
-            # Integer (default): use %d format
-            self.emit("    movq %rax, %rsi")           # value as second arg
-            self.emit("    leaq .int_fmt(%rip), %rdi")  # format string as first arg
+        self.generate_expression(arg)   # result in %rax
 
-        self.emit("    movq $0, %rax")  # no vector args for printf
+        t = self.expr_type(arg)
+        if t == "string":
+            self.emit("    movq %rax, %rsi")
+            self.emit("    leaq .str_fmt(%rip), %rdi")
+        else:
+            # int, bool, or unknown — default to %d
+            self.emit("    movq %rax, %rsi")
+            self.emit("    leaq .int_fmt(%rip), %rdi")
+
+        self.emit("    movq $0, %rax")
         self.emit("    call printf")
 
 
@@ -460,10 +521,14 @@ if __name__ == "__main__":
     from analyzer import Analyzer
 
     test_code = """
+fn add(a: int, b: int) -> int {
+    return a + b;
+}
+
 fn main() -> int {
     let x: int = 42;
     let y: int = 10;
-    let sum: int = x + y;
+    let sum: int = add(x, y);
 
     print(sum);
 
@@ -475,8 +540,19 @@ fn main() -> int {
 
     let i: int = 0;
     while i < 5 {
+        if i == 3 {
+            i = i + 1;
+            continue;
+        }
         print(i);
         i = i + 1;
+    }
+
+    for let j: int = 0; j < 3; j = j + 1 {
+        if j == 2 {
+            break;
+        }
+        print(j);
     }
 
     return 0;
@@ -485,24 +561,14 @@ fn main() -> int {
 
     print("=== ZIP Code Generator ===\n")
 
-    # Lex
     lexer = Lexer(test_code)
     tokens = lexer.tokenize()
-
-    # Parse
     parser = Parser(tokens)
     ast = parser.parse()
-
-    # Analyze
     analyzer = Analyzer()
     analyzer.analyze(ast)
-
-    # Generate
     codegen = CodeGenerator()
     asm = codegen.generate(ast)
 
     print(asm)
     print("\n--- Assembly generation complete! ---")
-    print("To compile (on Linux/WSL):")
-    print("  gcc -o program output.s -no-pie")
-    print("  ./program")
