@@ -1,0 +1,35 @@
+// Test: Mutual recursion (is_even and is_odd)
+fn is_even(n: int) -> int {
+    if n == 0 {
+        return 1;  // true
+    }
+    return is_odd(n - 1);
+}
+
+fn is_odd(n: int) -> int {
+    if n == 0 {
+        return 0;  // false
+    }
+    return is_even(n - 1);
+}
+
+fn main() -> int {
+    // Test even numbers
+    let e0: int = is_even(0);  // 1 (true)
+    let e2: int = is_even(2);  // 1 (true)
+    let e4: int = is_even(4);  // 1 (true)
+    
+    // Test odd numbers
+    let o1: int = is_odd(1);   // 1 (true)
+    let o3: int = is_odd(3);   // 1 (true)
+    let o5: int = is_odd(5);   // 1 (true)
+    
+    print(e0);  // 1
+    print(e2);  // 1
+    print(e4);  // 1
+    print(o1);  // 1
+    print(o3);  // 1
+    print(o5);  // 1
+    
+    return 0;
+}

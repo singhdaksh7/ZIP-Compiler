@@ -1,0 +1,40 @@
+// Test: Boolean operations and comparisons
+fn main() -> int {
+    let a: int = 5;
+    let b: int = 10;
+    
+    // Comparisons
+    let eq: bool = a == b;      // false (0)
+    let neq: bool = a != b;     // true (1)
+    let lt: bool = a < b;       // true (1)
+    let gt: bool = a > b;       // false (0)
+    let lte: bool = a <= b;     // true (1)
+    let gte: bool = a >= b;     // false (0)
+    
+    print(eq);   // 0
+    print(neq);  // 1
+    print(lt);   // 1
+    print(gt);   // 0
+    print(lte);  // 1
+    print(gte);  // 0
+    
+    // Logical operators
+    let t: bool = true;
+    let f: bool = false;
+    
+    let and_true: bool = t && t;   // true (1)
+    let and_false: bool = t && f;  // false (0)
+    let or_true: bool = t || f;    // true (1)
+    let or_false: bool = f || f;   // false (0)
+    let not_true: bool = !t;       // false (0)
+    let not_false: bool = !f;      // true (1)
+    
+    print(and_true);   // 1
+    print(and_false);  // 0
+    print(or_true);    // 1
+    print(or_false);   // 0
+    print(not_true);   // 0
+    print(not_false);  // 1
+    
+    return 0;
+}

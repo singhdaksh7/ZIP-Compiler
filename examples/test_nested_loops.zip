@@ -1,0 +1,37 @@
+// Test: Nested loops and complex control flow
+fn main() -> int {
+    // Test 1: Nested while loops
+    let i: int = 0;
+    while i < 3 {
+        let j: int = 0;
+        while j < 3 {
+            let product: int = i * 3 + j;
+            print(product);  // 0 1 2 3 4 5 6 7 8
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    
+    // Test 2: Nested for loops
+    for let x: int = 0; x < 2; x = x + 1 {
+        for let y: int = 0; y < 2; y = y + 1 {
+            print(x * 2 + y);  // 0 1 2 3
+        }
+    }
+    
+    // Test 3: Break in nested loop
+    let a: int = 0;
+    while a < 5 {
+        let b: int = 0;
+        while b < 5 {
+            if b == 2 {
+                break;
+            }
+            print(b);  // 0 1 (repeated 5 times, a=0..4)
+            b = b + 1;
+        }
+        a = a + 1;
+    }
+    
+    return 0;
+}

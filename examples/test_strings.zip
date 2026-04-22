@@ -1,0 +1,14 @@
+// Test: String operations and printing
+fn main() -> int {
+    let greeting: string = "Hello";
+    let name: string = "ZIP";
+    let lang: string = "Language";
+    let exclaim: string = "!";
+    
+    print(greeting);  // Hello
+    print(name);      // ZIP
+    print(lang);      // Language
+    print(exclaim);   // !
+    
+    return 0;
+}

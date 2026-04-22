@@ -1,0 +1,21 @@
+// Test: Recursive functions - Factorial
+fn factorial(n: int) -> int {
+    if n <= 1 {
+        return 1;
+    }
+    return n * factorial(n - 1);
+}
+
+fn main() -> int {
+    let f0: int = factorial(0);   // 1
+    let f1: int = factorial(1);   // 1
+    let f5: int = factorial(5);   // 120
+    let f10: int = factorial(10); // 3628800
+    
+    print(f0);
+    print(f1);
+    print(f5);
+    print(f10);
+    
+    return 0;
+}
