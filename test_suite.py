@@ -29,8 +29,8 @@ class TestResult:
         self.error = error
     
     def __repr__(self):
-        status = "✓ PASS" if self.passed else "✗ FAIL"
-        msg = f"{status}: {self.name}"
+        status = "[PASS]" if self.passed else "[FAIL]"
+        msg = f"{status} {self.name}"
         if self.error:
             msg += f"\n  Error: {self.error}"
         return msg
@@ -670,10 +670,10 @@ def run_test_suite():
     print()
     
     if passed == total:
-        print("✅ ALL TESTS PASSED! Compiler is working correctly!")
+        print("[OK] ALL TESTS PASSED! Compiler is working correctly!")
         return True
     else:
-        print("❌ SOME TESTS FAILED")
+        print("[FAIL] SOME TESTS FAILED")
         print()
         print("Failed tests:")
         for result in results:
