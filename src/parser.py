@@ -33,6 +33,14 @@ class Parser:
     def __init__(self, tokens: list[Token]):
         self.tokens = tokens
         self.pos = 0   # current position in the token list
+        self.token_count = len(tokens)  # Cache token count
+        
+        # Pre-compute token type sets for fast matching
+        self._comparison_ops = (TokenType.LT, TokenType.GT, TokenType.LTE, TokenType.GTE)
+        self._equality_ops = (TokenType.EQ, TokenType.NEQ)
+        self._addition_ops = (TokenType.PLUS, TokenType.MINUS)
+        self._multiplication_ops = (TokenType.STAR, TokenType.SLASH, TokenType.PERCENT)
+        self._unary_ops = (TokenType.MINUS, TokenType.NOT)
 
     # ─── Helpers ───────────────────────────────────────────────
 
@@ -315,7 +323,7 @@ class Parser:
     def parse_equality(self):
         """Parse == and != """
         left = self.parse_comparison()
-        while self.current().type in (TokenType.EQ, TokenType.NEQ):
+        while self.current().type in self._equality_ops:
             op_token = self.advance()
             right = self.parse_comparison()
             left = BinaryOp(left=left, op=op_token.value, right=right, line=op_token.line, col=op_token.column)
@@ -324,7 +332,7 @@ class Parser:
     def parse_comparison(self):
         """Parse <, >, <=, >= """
         left = self.parse_addition()
-        while self.current().type in (TokenType.LT, TokenType.GT, TokenType.LTE, TokenType.GTE):
+        while self.current().type in self._comparison_ops:
             op_token = self.advance()
             right = self.parse_addition()
             left = BinaryOp(left=left, op=op_token.value, right=right, line=op_token.line, col=op_token.column)
@@ -333,7 +341,7 @@ class Parser:
     def parse_addition(self):
         """Parse + and - """
         left = self.parse_multiplication()
-        while self.current().type in (TokenType.PLUS, TokenType.MINUS):
+        while self.current().type in self._addition_ops:
             op_token = self.advance()
             right = self.parse_multiplication()
             left = BinaryOp(left=left, op=op_token.value, right=right, line=op_token.line, col=op_token.column)
@@ -342,7 +350,7 @@ class Parser:
     def parse_multiplication(self):
         """Parse *, /, % """
         left = self.parse_unary()
-        while self.current().type in (TokenType.STAR, TokenType.SLASH, TokenType.PERCENT):
+        while self.current().type in self._multiplication_ops:
             op_token = self.advance()
             right = self.parse_unary()
             left = BinaryOp(left=left, op=op_token.value, right=right, line=op_token.line, col=op_token.column)
@@ -350,7 +358,7 @@ class Parser:
 
     def parse_unary(self):
         """Parse unary operators: -x, !flag"""
-        if self.current().type in (TokenType.MINUS, TokenType.NOT):
+        if self.current().type in self._unary_ops:
             op_token = self.advance()
             operand = self.parse_unary()  # right-recursive for chaining: --x, !!flag
             return UnaryOp(op=op_token.value, operand=operand, line=op_token.line, col=op_token.column)

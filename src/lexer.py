@@ -8,6 +8,7 @@ Usage:
     tokens = lexer.tokenize()
 """
 
+from io import StringIO
 from tokens import Token, TokenType, KEYWORDS
 
 
@@ -22,6 +23,7 @@ class LexerError(Exception):
 class Lexer:
     def __init__(self, source: str):
         self.source = source
+        self.source_len = len(source)  # Cache source length to avoid repeated len() calls
         self.pos = 0         
         self.line = 1         
         self.column = 1     
@@ -29,7 +31,7 @@ class Lexer:
 
     def peek(self) -> str | None:
         """Look at the current character without consuming it."""
-        if self.pos >= len(self.source):
+        if self.pos >= self.source_len:
             return None
         return self.source[self.pos]
 
@@ -46,19 +48,19 @@ class Lexer:
 
     def match(self, expected: str) -> bool:
         """Consume the next character if it matches expected."""
-        if self.pos < len(self.source) and self.source[self.pos] == expected:
+        if self.pos < self.source_len and self.source[self.pos] == expected:
             self.advance()
             return True
         return False
 
     def skip_whitespace(self):
         """Skip spaces, tabs, and carriage returns (but not newlines)."""
-        while self.pos < len(self.source) and self.source[self.pos] in (' ', '\t', '\r', '\n'):
+        while self.pos < self.source_len and self.source[self.pos] in (' ', '\t', '\r', '\n'):
             self.advance()
 
     def skip_comment(self):
         """Skip single-line comments starting with //."""
-        while self.pos < len(self.source) and self.source[self.pos] != '\n':
+        while self.pos < self.source_len and self.source[self.pos] != '\n':
             self.advance()
 
     def read_string(self) -> Token:
@@ -67,13 +69,13 @@ class Lexer:
         start_col = self.column
         self.advance()  
 
-        result = []
-        while self.pos < len(self.source):
+        result = StringIO()
+        while self.pos < self.source_len:
             ch = self.source[self.pos]
 
             if ch == '"':
                 self.advance()  
-                return Token(TokenType.STRING_LITERAL, ''.join(result), start_line, start_col)
+                return Token(TokenType.STRING_LITERAL, result.getvalue(), start_line, start_col)
 
             if ch == '\\':
                 self.advance()
@@ -82,14 +84,14 @@ class Lexer:
                     raise LexerError("Unexpected end of file in string", self.line, self.column)
                 escape_map = {'n': '\n', 't': '\t', '\\': '\\', '"': '"'}
                 if escaped in escape_map:
-                    result.append(escape_map[escaped])
+                    result.write(escape_map[escaped])
                     self.advance()
                 else:
                     raise LexerError(f"Unknown escape sequence: \\{escaped}", self.line, self.column)
             elif ch == '\n':
                 raise LexerError("Unterminated string (newline in string)", self.line, self.column)
             else:
-                result.append(ch)
+                result.write(ch)
                 self.advance()
 
         raise LexerError("Unterminated string literal", start_line, start_col)
@@ -98,27 +100,24 @@ class Lexer:
         """Read an integer literal."""
         start_line = self.line
         start_col = self.column
-        result = []
+        result = StringIO()
 
-        while self.pos < len(self.source) and self.source[self.pos].isdigit():
-            result.append(self.advance())
+        while self.pos < self.source_len and self.source[self.pos].isdigit():
+            result.write(self.advance())
 
-        return Token(TokenType.INT_LITERAL, ''.join(result), start_line, start_col)
+        return Token(TokenType.INT_LITERAL, result.getvalue(), start_line, start_col)
 
     def read_identifier(self) -> Token:
         """Read an identifier or keyword."""
         start_line = self.line
         start_col = self.column
-        result = []
+        result = StringIO()
 
-        while self.pos < len(self.source) and (self.source[self.pos].isalnum() or self.source[self.pos] == '_'):
-            result.append(self.advance())
+        while self.pos < self.source_len and (self.source[self.pos].isalnum() or self.source[self.pos] == '_'):
+            result.write(self.advance())
 
-        word = ''.join(result)
-
-        
+        word = result.getvalue()
         token_type = KEYWORDS.get(word, TokenType.IDENTIFIER)
-
         return Token(token_type, word, start_line, start_col)
 
     def make_token(self, token_type: TokenType, value: str, line: int, col: int) -> Token:
@@ -127,10 +126,13 @@ class Lexer:
 
     def tokenize(self) -> list[Token]:
         """Tokenize the entire source string and return a list of tokens."""
-        while self.pos < len(self.source):
+        # Pre-compute single-char token set for fast lookups
+        single_char_set = {'+', '-', '*', '/', '%', '=', '<', '>', '!', '(', ')', '{', '}', ';', ':', ','}
+        
+        while self.pos < self.source_len:
             self.skip_whitespace()
 
-            if self.pos >= len(self.source):
+            if self.pos >= self.source_len:
                 break
 
             ch = self.source[self.pos]
@@ -138,7 +140,7 @@ class Lexer:
             start_col = self.column
 
           
-            if ch == '/' and self.pos + 1 < len(self.source) and self.source[self.pos + 1] == '/':
+            if ch == '/' and self.pos + 1 < self.source_len and self.source[self.pos + 1] == '/':
                 self.skip_comment()
                 continue
 
@@ -221,7 +223,7 @@ class Lexer:
 
     def match_ahead(self, expected: str) -> bool:
         """Check if the next character (pos+1) matches expected, without consuming."""
-        return self.pos + 1 < len(self.source) and self.source[self.pos + 1] == expected
+        return self.pos + 1 < self.source_len and self.source[self.pos + 1] == expected
 
 
 if __name__ == "__main__":

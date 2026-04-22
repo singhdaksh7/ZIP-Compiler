@@ -44,6 +44,16 @@ class CodeGenerator:
 
         # Function signatures (populated from Program before body gen)
         self.func_return_types = {} # fn name -> return type string
+        
+        # Pre-computed parameter registers for faster access
+        self.param_registers = ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"]
+        
+        # Pre-computed binary operation handlers for faster dispatch
+        self._arith_ops = {"+": lambda: "addq %rcx, %rax",
+                           "-": lambda: "subq %rcx, %rax",
+                           "*": lambda: "imulq %rcx, %rax"}
+        self._compare_ops = {"==": "sete", "!=": "setne", "<": "setl", ">": "setg",
+                             "<=": "setle", ">=": "setge"}
 
     def emit(self, line: str):
         """Add a line of assembly."""
@@ -185,12 +195,11 @@ class CodeGenerator:
         self.emit("    subq $PLACEHOLDER, %rsp")
 
         # Spill parameters from registers to the stack (System V ABI)
-        param_registers = ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"]
         for i, param in enumerate(fn.params):
-            if i >= len(param_registers):
+            if i >= len(self.param_registers):
                 raise CodeGenError(f"Function '{fn.name}': more than 6 parameters not supported")
             self.alloc_var(param.name, param.type_name)
-            self.emit(f"    movq {param_registers[i]}, -{self.stack_offset}(%rbp)")
+            self.emit(f"    movq {self.param_registers[i]}, -{self.stack_offset}(%rbp)")
 
         # Generate body
         for stmt in fn.body:
@@ -398,13 +407,9 @@ class CodeGenerator:
         # Restore left to %rax
         self.emit("    popq %rax")          # left -> %rax
 
-        # Arithmetic
-        if expr.op == "+":
-            self.emit("    addq %rcx, %rax")
-        elif expr.op == "-":
-            self.emit("    subq %rcx, %rax")
-        elif expr.op == "*":
-            self.emit("    imulq %rcx, %rax")
+        # Arithmetic with pre-computed ops
+        if expr.op in self._arith_ops:
+            self.emit(f"    {self._arith_ops[expr.op]()}")
         elif expr.op == "/":
             self.emit("    cqto")
             self.emit("    idivq %rcx")
@@ -413,19 +418,13 @@ class CodeGenerator:
             self.emit("    idivq %rcx")
             self.emit("    movq %rdx, %rax")
 
-        # Comparisons — produce 1 or 0
-        elif expr.op in ("==", "!=", "<", ">", "<=", ">="):
+        # Comparisons with pre-computed ops
+        elif expr.op in self._compare_ops:
             self.emit("    cmpq %rcx, %rax")
-            set_map = {
-                "==": "sete",  "!=": "setne",
-                "<":  "setl",  ">":  "setg",
-                "<=": "setle", ">=": "setge",
-            }
-            self.emit(f"    {set_map[expr.op]} %al")
+            self.emit(f"    {self._compare_ops[expr.op]} %al")
             self.emit("    movzbq %al, %rax")
 
-        # Logical &&  (short-circuit already evaluated both sides, but that's OK
-        # for a simple compiler; true short-circuit needs jump-based lazy eval)
+        # Logical &&
         elif expr.op == "&&":
             self.emit("    cmpq $0, %rax")
             short = self.label("and_short")
